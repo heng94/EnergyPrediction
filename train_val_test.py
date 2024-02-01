@@ -12,15 +12,17 @@ from torch.utils.data import DataLoader
 from datasets.dataset import TimeSerialDataset
 from torch.nn.utils import clip_grad_norm_
 from models.DeepAR import DeepAR
+from sklearn.metrics import r2_score, mean_absolute_percentage_error
 
 
 def main(args):
     
     torch.manual_seed(args.train.seed)
     torch.cuda.manual_seed_all(args.train.seed)
+    torch.cuda.manual_seed(args.train.seed)
     np.random.seed(args.train.seed)
     random.seed(args.train.seed)
-    torch.backends.cudnn.deterministic = False
+    torch.backends.cudnn.deterministic = True
     
     # load data
     train_dataset = TimeSerialDataset(args, split='train')
@@ -73,29 +75,109 @@ def main(args):
     lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
         optimizer, 
         T_max=args.train.T_max, 
-        eta_min=args.train.eta_min
+        eta_min=float(args.train.eta_min)
     )
     
     best_val_r2 = -1000
     
-    # train loop 
+    # train-val loop 
     for epoch in range(args.train.num_epochs):
+        
+        # training
         train_loss = 0
         model.train()
         for data, label in train_dataloader:
             data, label = data.to(device), label.to(device)
             optimizer.zero_grad()
-            output = model(data)
-            loss = loss_fn(output, label)
+            mean, var = model(data)
+            loss = loss_fn(mean, var, label)
             loss.backward()
             clip_grad_norm_(model.parameters(), args.train.gradient_clip_val)
             optimizer.step()
             train_loss += loss.item()
             wandb.log({'train_loss_step': loss.item()})
-    
-    
-    
+        lr_scheduler.step()
+        wandb.log({'train_loss_epoch': train_loss / len(train_dataloader), 'epoch': epoch})
+        wandb.log({'lr': optimizer.param_groups[0]['lr'], 'epoch': epoch})
+        logger.info(f'Epoch {epoch} train loss: {train_loss / len(train_dataloader)}')
+        
+        # validation
+        val_loss = 0
+        pred_list = []
+        label_list = []
+        model.eval()
+        with torch.no_grad():
+            for data, label in val_dataloader:
+                data, label = data.to(device), label.to(device)
+                mean, var = model(data)
+                loss = loss_fn(mean, var, label)
+                val_loss += loss.item()
+                wandb.log({'val_loss_step': loss.item()})
+                pred_list.append(
+                    mean.cpu().numpy().reshape(-1, 1)
+                )  # (batch_size * window_size, 1)
+                label_list.append(
+                    label.cpu().numpy().reshape(-1, 1)
+                )  # (batch_size * window_size, 1)
+        wandb.log({'val_loss_epoch': val_loss / len(val_dataloader), 'epoch': epoch})
+        pred = target_scaler.inverse_transform(np.concatenate(pred_list, axis=0))
+        actual = target_scaler.inverse_transform(np.concatenate(label_list, axis=0))
+        val_mae = np.mean(np.abs(pred - actual))
+        wandb.log({'val_mae': val_mae, 'epoch': epoch})
+        logger.info(f'Epoch {epoch} validation MAE: {val_mae}')
+        
+        val_rmse = np.sqrt(np.mean((pred - actual) ** 2))
+        wandb.log({'val_rmse': val_rmse, 'epoch': epoch})
+        logger.info(f'Epoch {epoch} validation RMSE: {val_rmse}')
+        
+        val_r2 = r2_score(actual, pred)
+        wandb.log({'val_r2': val_r2, 'epoch': epoch})
+        logger.info(f'Epoch {epoch} validation R2: {val_r2}')
+        
+        val_mape = mean_absolute_percentage_error(actual, pred)
+        wandb.log({'val_mape': val_mape, 'epoch': epoch})
+        logger.info(f'Epoch {epoch} validation MAPE: {val_mape}')
+        
+        # save the best model accrording to val_r2
+        if val_r2 > best_val_r2:
+            best_val_r2 = val_r2
+            torch.save(model.state_dict(), os.path.join(log_path, 'best_model.pth'))
+            logger.info(f'Epoch {epoch} best model saved, val_r2: {val_r2}')
+            
+    # test
+    model.load_state_dict(torch.load(os.path.join(log_path, 'best_model.pth')))
+    model.to(device)
+    model.eval()
 
+    pred_list = []
+    label_list = []
+    hidden = model.init_hidden()
+    with torch.no_grad():
+        for data, label in val_dataloader:
+            data, label = data.to(device), label.to(device)
+            output = model(data, hidden)
+            pred_list.append(output.cpu().numpy().reshape(-1, 1))
+            label_list.append(label.cpu().numpy().reshape(-1, 1))
+        
+        pred = target_scaler.inverse_transform(np.concatenate(pred_list, axis=0))
+        actual = target_scaler.inverse_transform(np.concatenate(label_list, axis=0))
+        test_mae = np.mean(np.abs(pred - actual))
+        wandb.log({'test_mae': test_mae})
+        logger.info(f'Test MAE: {test_mae}')
+        
+        test_rmse = np.sqrt(np.mean((pred - actual) ** 2))
+        wandb.log({'test_rmse': test_rmse})
+        logger.info(f'Test RMSE: {test_rmse}')
+        
+        test_r2 = r2_score(actual, pred)
+        wandb.log({'test_r2': test_r2})
+        logger.info(f'Test R2: {test_r2}')
+        
+        test_mape = mean_absolute_percentage_error(actual, pred)
+        wandb.log({'test_mape': test_mape})
+        logger.info(f'Test MAPE: {test_mape}')
+        
+        
 if __name__ == '__main__':
     
     parser = argparse.ArgumentParser(description='Train, validation and test for energy prediction')

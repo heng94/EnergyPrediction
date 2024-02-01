@@ -1,30 +1,45 @@
 log:
   project_name: 'deepar_original'
-  run_name: 'exp_7'
+  run_name: 'exp_1'
   log_path: './logs'
 
 results:
   results_path: './results'
 
 data:
-  data_type: 'original'  # original, corelation, time
+  data_type: 'original'  # original, corelation
   file_path: './data/data.csv'
-  prediction_length: 24
+  future_steps: 24
   train_cutoff: 9119
   val_cutoff: 10271
   total_num: 11423
   window_size: 168
   shift: 1
   cor_threshold: 0.5
+  use_time: False
 
 model:
+  input_size: 10
+  hidden_size: 64
+  num_layers: 2
+  dropout: 0.0
+  output_size: 2
   
 train:
   seed: 3407
   gpu_index: 0
+  use_all: True
+  single_pred: False
+  batch_size: 4
+  lr: 0.001
+  weight_decay: 1e-5
+  T_max: 100
+  eta_min: 1e-7
+  num_epochs: 160
+  gradient_clip_val: 0.1
 
 val:
-  batch_size: 32
+  batch_size: 1
 
 test:
-  batch_size: 32
+  batch_size: 1
