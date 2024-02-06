@@ -1,6 +1,6 @@
 log:
   project_name: 'deepar_original'
-  run_name: 'exp_1'
+  run_name: 'exp_12'
   log_path: './logs'
 
 results:
@@ -8,34 +8,33 @@ results:
 
 data:
   data_type: 'original'  # original, corelation
-  file_path: './data/data.csv'
+  file_path: './data/area_0_v2.csv'
   future_steps: 24
-  train_cutoff: 9119
-  val_cutoff: 10271
-  total_num: 11423
+  train_cutoff: 8448  # 80% of the data: 440*24*0.8=8448
+  val_cutoff: 9504    # 10% of the data: 8448+440*24*0.1=9504
+  total_num: 10560    # 10% of the data: 8448+440*24=10560
   window_size: 168
   shift: 1
   cor_threshold: 0.5
   use_time: False
 
 model:
-  input_size: 10
-  hidden_size: 64
-  num_layers: 2
-  dropout: 0.0
+  hidden_size: 96
+  num_layers: 6
+  dropout: 0.1
   output_size: 2
   
 train:
   seed: 3407
   gpu_index: 0
   use_all: True
-  single_pred: False
+  single_pred: True
   batch_size: 4
   lr: 0.001
-  weight_decay: 1e-5
-  T_max: 100
-  eta_min: 1e-7
-  num_epochs: 160
+  weight_decay: 1e-6
+  T_max: 150
+  eta_min: 1e-9
+  num_epochs: 200
   gradient_clip_val: 0.1
 
 val:

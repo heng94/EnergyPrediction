@@ -6,6 +6,7 @@ import shutil
 import wandb
 import random
 import numpy as np
+import pandas as pd
 from loguru import logger
 from omegaconf import OmegaConf
 from torch.utils.data import DataLoader
@@ -13,6 +14,7 @@ from datasets.dataset import TimeSerialDataset
 from torch.nn.utils import clip_grad_norm_
 from models.DeepAR import DeepAR
 from sklearn.metrics import r2_score, mean_absolute_percentage_error
+from matplotlib import pyplot as plt
 
 
 def main(args):
@@ -26,6 +28,8 @@ def main(args):
     
     # load data
     train_dataset = TimeSerialDataset(args, split='train')
+    args.model.input_size = train_dataset.get_input_dim()
+    assert args.model.input_size is not None
     feature_scaler, target_scaler = train_dataset.get_scaler()
     train_dataloader = DataLoader(
         train_dataset, 
@@ -62,7 +66,7 @@ def main(args):
     # load model
     device = torch.device(f'cuda:{args.train.gpu_index}' if torch.cuda.is_available() else 'cpu')
     model = DeepAR(args, device=device).to(device)
-    loss_fn = model.loss_fn
+    loss_fn = model.loss
     
     # optimizer
     optimizer = torch.optim.AdamW(
@@ -151,13 +155,12 @@ def main(args):
 
     pred_list = []
     label_list = []
-    hidden = model.init_hidden()
     with torch.no_grad():
         for data, label in val_dataloader:
-            data, label = data.to(device), label.to(device)
-            output = model(data, hidden)
-            pred_list.append(output.cpu().numpy().reshape(-1, 1))
-            label_list.append(label.cpu().numpy().reshape(-1, 1))
+            data = data.to(device)
+            mean, var = model(data)
+            pred_list.append(mean.cpu().numpy().reshape(-1, 1))
+            label_list.append(label.numpy().reshape(-1, 1))
         
         pred = target_scaler.inverse_transform(np.concatenate(pred_list, axis=0))
         actual = target_scaler.inverse_transform(np.concatenate(label_list, axis=0))
@@ -177,11 +180,64 @@ def main(args):
         wandb.log({'test_mape': test_mape})
         logger.info(f'Test MAPE: {test_mape}')
         
+    # predict
+    model.eval()
+    predict_data = pd.read_csv(args.data.file_path).to_numpy().astype(np.float32)[args.data.val_cutoff:, :]
+    prediction = []
+    label = []
+    for k in range(int((args.data.total_num - args.data.val_cutoff) / 24) - int(args.data.window_size / 24)):
+        input_data = predict_data[k * args.data.window_size: (k + 1) * args.data.window_size, :]
+        input_data = feature_scaler.transform(input_data)
         
+        input_label = predict_data[(k + 1) * args.data.window_size: (k + 1) * args.data.window_size + args.data.future_steps, 0]
+        label.append(input_label.reshape(-1, 1))
+        
+        input_data = torch.from_numpy(input_data.reshape(1, args.data.window_size, args.model.input_size)).to(device)
+        
+        with torch.no_grad():
+            mean, var = model(input_data)
+            pred = target_scaler.inverse_transform(mean.cpu().numpy().reshape(-1, 1))
+            prediction.append(pred)
+    
+    prediction = np.concatenate(prediction, axis=0)
+    label = np.concatenate(label, axis=0)
+    test_mae = np.mean(np.abs(prediction - label))
+    wandb.log({'predict_mae': test_mae})
+    logger.info(f'Predict MAE: {test_mae}')
+    
+    test_rmse = np.sqrt(np.mean((prediction - label) ** 2))
+    wandb.log({'predict_rmse': test_rmse})
+    logger.info(f'Predict RMSE: {test_rmse}')
+    
+    test_r2 = r2_score(label, prediction)
+    wandb.log({'predict_r2': test_r2})
+    logger.info(f'Predict R2: {test_r2}')
+    
+    test_mape = mean_absolute_percentage_error(label, prediction)
+    wandb.log({'predict_mape': test_mape})
+    logger.info(f'Predict MAPE: {test_mape}')
+    
+    # save results
+    result = pd.DataFrame({
+        'actual': label.reshape(-1),
+        'prediction': prediction.reshape(-1),
+    })  
+    result.to_csv(os.path.join(result_path, 'result.csv'), index=False)
+    
+    # visualize
+    x_aix = np.arange(len(label))
+    plt.plot(x_aix, label, label='actual')
+    plt.plot(x_aix, prediction, label='prediction')
+    plt.legend()
+    plt.savefig(os.path.join(result_path, 'result.png'))
+    plt.close()
+    wandb.log({'result': wandb.Image(os.path.join(result_path, 'result.png'))})
+    
+    
 if __name__ == '__main__':
     
     parser = argparse.ArgumentParser(description='Train, validation and test for energy prediction')
-    parser.add_argument("--cfg_file", type=str, default="./configs/deepar_time.yaml")
+    parser.add_argument("--cfg_file", type=str, default="./configs/deepar_original.yaml")
     
     args = OmegaConf.load(parser.parse_args().cfg_file)
     
@@ -196,7 +252,7 @@ if __name__ == '__main__':
     logger.add(log_file, format="{time} {level} {message}", level="INFO")
     
     # copy config file to log dir
-    shutil.copy(args.cfg_file, log_path)
+    shutil.copy(parser.parse_args().cfg_file, log_path)
     
     result_root_path = os.path.join(args.results.results_path, args.log.project_name, args.log.run_name)
     os.makedirs(result_root_path, exist_ok=True)

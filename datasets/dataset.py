@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 from torch.utils.data import Dataset
 from sklearn.preprocessing import MinMaxScaler
-from utils import time_feature_weight
+from .utils import time_feature_weight
 
 
 class TimeSerialDataset(Dataset):
@@ -33,9 +33,13 @@ class TimeSerialDataset(Dataset):
             
         return self.feature_scaler, self.target_scaler
     
+    def get_input_dim(self,):
+        
+        return self.data.shape[-1]
+    
     def create_data(self,):
         
-        df = pd.read_csv(self.args.data.file_path, index_col=0)
+        df = pd.read_csv(self.args.data.file_path)
         
         if self.args.data.data_type == 'original':
             
@@ -51,7 +55,7 @@ class TimeSerialDataset(Dataset):
             correlation = df.corr(method='pearson')[['data']].sort_values(by='data', ascending=False)
             
             # keep the features with correlation coefficient larger than 0.5
-            correlation = correlation[correlation['data'] > self.args.data.cor_threshold]
+            correlation = correlation[np.abs(correlation['data']) > self.args.data.cor_threshold]
             
             # get the df with selected features
             df = df[correlation.index].to_numpy().astype(np.float32)
@@ -79,16 +83,16 @@ class TimeSerialDataset(Dataset):
             self.feature_scaler = MinMaxScaler()
         
         target_norm = self.target_scaler.fit_transform(raw_data[:, 0].reshape(-1, 1))  # [num_samples, 1]
-        data_norm = self.feature_scaler.fit_transform(raw_data[:, 1:])  # [num_samples, num_features]
+        data_norm = self.feature_scaler.fit_transform(raw_data)  # [num_samples, num_features]
             
         data_list, target_list = [], []
         for idx in range(0, data_norm.shape[0] - self.args.data.window_size * 2, self.args.data.shift):
             data_list.append(data_norm[idx: idx + self.args.data.window_size, :])
-            target_list.append(target_norm[idx + self.args.data.window_size: idx + self.args.data.window_size * 2, :])
+            target_list.append(target_norm[idx + self.args.data.window_size: idx + self.args.data.window_size + self.args.data.future_steps, :])
             
         data, target = np.array(data_list), np.array(target_list)
             
         data = torch.from_numpy(data.reshape(-1, self.args.data.window_size, data_norm.shape[1]))
-        target = torch.from_numpy(target.reshape(-1, self.args.data.window_size, target_norm.shape[1]))
+        target = torch.from_numpy(target.reshape(-1, self.args.data.future_steps, target_norm.shape[1]))
         
         return data, target

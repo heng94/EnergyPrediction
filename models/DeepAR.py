@@ -68,7 +68,7 @@ class DeepAR(nn.Module):
         
         if self.args.train.single_pred:
             
-            return mean
+            return mean, var
         else:
             
             mean = out[:, :, 0]
@@ -79,6 +79,10 @@ class DeepAR(nn.Module):
     def loss(self, mean, var, y):
         
         ''' Calculate the loss function '''
+        
+        mean = mean.reshape(-1, 1)
+        var = var.reshape(-1, 1)
+        y = y.reshape(-1, 1)
         
         if self.args.train.single_pred:
             
