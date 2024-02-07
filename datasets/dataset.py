@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 from torch.utils.data import Dataset
 from sklearn.preprocessing import MinMaxScaler
-from .utils import time_feature_weight
+from .utils import *
 
 
 class TimeSerialDataset(Dataset):
@@ -37,6 +37,10 @@ class TimeSerialDataset(Dataset):
         
         return self.data.shape[-1]
     
+    def get_cor_index(self,):
+            
+            return self.cor_index
+        
     def create_data(self,):
         
         df = pd.read_csv(self.args.data.file_path)
@@ -51,17 +55,16 @@ class TimeSerialDataset(Dataset):
 
         else:
             
-            # calculate correlation matrix
-            correlation = df.corr(method='pearson')[['data']].sort_values(by='data', ascending=False)
-            
-            # keep the features with correlation coefficient larger than 0.5
-            correlation = correlation[np.abs(correlation['data']) > self.args.data.cor_threshold]
-            
-            # get the df with selected features
-            df = df[correlation.index].to_numpy().astype(np.float32)
-            
+            tmp_df = df[weather_features + ['data']]
+            correlation = tmp_df.corr(method='pearson')
+            keeping_features = correlation[np.abs(correlation['data']) > self.args.data.cor_threshold].index.tolist()
+            new_df = df[time_features + keeping_features]
+            column_pop = new_df.pop('data')
+            new_df.insert(0, 'data', column_pop)
+            df = new_df.to_numpy().astype(np.float32)
             raw_data = self.data_split(df) 
             data, target = self.load_data(raw_data)
+            self.cor_index = new_df.columns.tolist()
             
             return data, target
         

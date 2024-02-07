@@ -11,6 +11,7 @@ from loguru import logger
 from omegaconf import OmegaConf
 from torch.utils.data import DataLoader
 from datasets.dataset import TimeSerialDataset
+from datasets.utils import *
 from torch.nn.utils import clip_grad_norm_
 from models.DeepAR import DeepAR
 from sklearn.metrics import r2_score, mean_absolute_percentage_error
@@ -182,14 +183,21 @@ def main(args):
         
     # predict
     model.eval()
-    predict_data = pd.read_csv(args.data.file_path).to_numpy().astype(np.float32)[args.data.val_cutoff:, :]
+    predict_data = pd.read_csv(args.data.file_path)
+    if args.data.data_type == 'correlation':
+        predict_data = predict_data[train_dataset.get_cor_index()]
+    predict_data = predict_data.to_numpy().astype(np.float32)[args.data.val_cutoff:, :]
     prediction = []
     label = []
-    for k in range(int((args.data.total_num - args.data.val_cutoff) / 24) - int(args.data.window_size / 24)):
-        input_data = predict_data[k * args.data.window_size: (k + 1) * args.data.window_size, :]
+    for k in range(int((args.data.total_num - args.data.val_cutoff - args.data.window_size)/24)):
+        input_data = predict_data[k * 24: k * 24 + args.data.window_size, :]
         input_data = feature_scaler.transform(input_data)
         
-        input_label = predict_data[(k + 1) * args.data.window_size: (k + 1) * args.data.window_size + args.data.future_steps, 0]
+        if args.data.use_time:
+            assert time_feature_weight.shape[-1] == input_data.shape[-1]
+            input_data = input_data * time_feature_weight
+            
+        input_label = predict_data[k * 24 + args.data.window_size: k * 24 + args.data.window_size + args.data.future_steps, 0]
         label.append(input_label.reshape(-1, 1))
         
         input_data = torch.from_numpy(input_data.reshape(1, args.data.window_size, args.model.input_size)).to(device)
@@ -218,16 +226,21 @@ def main(args):
     logger.info(f'Predict MAPE: {test_mape}')
     
     # save results
+    time_idx = list(range(
+        args.data.val_cutoff + args.data.window_size,
+        args.data.total_num,
+        1
+    ))
     result = pd.DataFrame({
+        'time_idx': time_idx,
         'actual': label.reshape(-1),
         'prediction': prediction.reshape(-1),
     })  
     result.to_csv(os.path.join(result_path, 'result.csv'), index=False)
     
     # visualize
-    x_aix = np.arange(len(label))
-    plt.plot(x_aix, label, label='actual')
-    plt.plot(x_aix, prediction, label='prediction')
+    plt.plot(time_idx, label, label='actual')
+    plt.plot(time_idx, prediction, label='prediction')
     plt.legend()
     plt.savefig(os.path.join(result_path, 'result.png'))
     plt.close()

@@ -2,3 +2,7 @@ experiment_log.md
 data/
 logs/
 results/
+configs/
+datasets/data_process.py
+datasets/__pycache__/
+models/__pycache__/
