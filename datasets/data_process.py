@@ -69,7 +69,7 @@ weather_features = [
 tmp_df = df[weather_features + ['data']]
 
 correlation = tmp_df.corr(method='pearson')
-keeping_features = correlation[np.abs(correlation['data']) > 0.1].index.tolist()
+keeping_features = correlation[np.abs(correlation['data']) > 0.9].index.tolist()
 new_df = df[time_features + keeping_features]
 column_pop = new_df.pop('data')
 new_df.insert(0, 'data', column_pop)
