@@ -4,10 +4,12 @@ logs/
 results/
 configs/
 datasets/data_process.py
-datasets/__pycache__/
-models/__pycache__/
+**/__pycache__/
 deepar_logs/
 deepar_results/
 lstm_b_logs/
 lstm_b_results/
+lstm_t_logs/
 forecasting.ipynb
+build_dataset.py
+cnn_regressor.py
