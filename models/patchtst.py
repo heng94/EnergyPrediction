@@ -3,7 +3,7 @@ import math
 import numpy as np
 import torch.nn as nn
 import torch.nn.functional as F
-from build import MODEL_REGISTRY
+from .build import MODEL_REGISTRY
 
 
 class PositionalEmbedding(nn.Module):
@@ -36,6 +36,16 @@ class PatchEmbedding(nn.Module):
         self.position_embedding = PositionalEmbedding(d_model)
         #* Residual dropout
         self.dropout = nn.Dropout(dropout)
+
+    def forward(self, x):
+        #* do patching
+        n_vars = x.shape[1]
+        x = self.padding_patch_layer(x)
+        x = x.unfold(dimension=-1, size=self.patch_len, step=self.stride)
+        x = torch.reshape(x, (x.shape[0] * x.shape[1], x.shape[2], x.shape[3]))
+        #* Input encoding
+        x = self.value_embedding(x) + self.position_embedding(x)
+        return self.dropout(x), n_vars
 
 
 class Encoder(nn.Module):
@@ -239,8 +249,8 @@ class PatchTST(nn.Module):
         dec_out = dec_out.permute(0, 2, 1)
 
         #* De-Normalization from Non-stationary Transformer
-        dec_out = dec_out * (stdev[:, 0, :].unsqueeze(1).repeat(1, self.pred_len, 1))
-        dec_out = dec_out + (means[:, 0, :].unsqueeze(1).repeat(1, self.pred_len, 1))
+        dec_out = dec_out * (stdev[:, 0, :].unsqueeze(1).repeat(1, self.args.data.pred_len, 1))
+        dec_out = dec_out + (means[:, 0, :].unsqueeze(1).repeat(1, self.args.data.pred_len, 1))
 
         if self.args.model.output_attention:
             return dec_out[:, -self.args.data.pred_len:, :], attns

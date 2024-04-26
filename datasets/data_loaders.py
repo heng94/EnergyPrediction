@@ -1,8 +1,12 @@
 import os
+import warnings
 import pandas as pd
 from .utils import time_features
 from torch.utils.data import Dataset
 from sklearn.preprocessing import StandardScaler
+
+
+warnings.filterwarnings('ignore')
 
 
 class Dataset_Electricity(Dataset):

@@ -17,10 +17,8 @@ def setup(args):
 
 def main(args):
     cfg = setup(args)
-    print(cfg)
-
-    # trainer = Trainer(cfg)
-    # trainer.train()
+    trainer = Trainer(cfg)
+    trainer.train()
 
 
 if __name__ == "__main__":
