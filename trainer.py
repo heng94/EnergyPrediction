@@ -13,6 +13,7 @@ from datasets.data_factory import data_provider
 from utils.util import EarlyStopping, metric
 from torch import optim
 from torch.nn.utils import clip_grad_norm_
+from sklearn.metrics import r2_score
 
 
 class Trainer(object):
@@ -361,19 +362,24 @@ class Trainer(object):
         predictions = np.concatenate(np.array(predictions), axis=0)
         actuals = np.concatenate(np.array(actuals), axis=0)
         pred_mae, pred_mse, pred_rmse, pred_mape, pred_mspe = metric(predictions, actuals)
+
+        #* calculate the r2
+        r2 = r2_score(actuals, predictions)
         self.wandb.log({
             'pred_MAE': pred_mae, 
             'pred_MSE': pred_mse, 
             'pred_RMSE': pred_rmse, 
             'pred_MAPE': pred_mape, 
-            'pred_MSPE': pred_mspe
+            'pred_MSPE': pred_mspe,
+            'pred_R2': r2,
         })
         self.logger.info(
             f'Prediction MAE:{pred_mae:.4f}, ' 
             f'Prediction MSE:{pred_mse:.4f}, ' 
             f'Prediction RMSE:{pred_rmse:.4f}, '
             f'Prediction MAPE:{pred_mape:.4f}, '
-            f'Prediction MSP:{pred_mspe:.4f}.'
+            f'Prediction MSP:{pred_mspe:.4f}, '
+            f'Prediction R2:{r2:.4f}.'
         )
         
         test_results = pd.DataFrame({'actual': actuals.reshape(-1), 'pred': predictions})
