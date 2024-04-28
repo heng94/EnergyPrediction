@@ -132,6 +132,11 @@ class Trainer(object):
         time_now = time.time()
         train_steps = len(train_loader)
         early_stopping = EarlyStopping(args=self.args, logger=self.logger, save_path=self.log_path)
+        #* scheduler
+        if self.args.train.warmup and epoch < self.args.train.warmup_epochs:
+            scheduler = self._warmup(epoch)
+        else:
+            scheduler = self._select_scheduler()
         
         if self.args.train.use_amp:
             grad_scaler = torch.cuda.amp.GradScaler()
@@ -195,12 +200,6 @@ class Trainer(object):
                     )
                     iter_count = 0
                     time_now = time.time()
-            #* scheduler
-                    
-            if self.args.train.warmup and epoch < self.args.train.warmup_epochs:
-                scheduler = self._warmup(epoch)
-            else:
-                scheduler = self._select_scheduler()
             scheduler.step()
             self.wandb.log({'learning_rate': self.optimizer.param_groups[0]['lr'], 'epoch': epoch+1})
 
@@ -330,14 +329,14 @@ class Trainer(object):
     def predict(self):
         test_data, test_loader = self._get_data(flag='test')
         df = pd.read_csv(os.path.join(self.args.data.root_path, self.args.data.data_path))
-        prediction_data = df.tail(
-            int(len(df) * (1 - self.args.data.train_scale - self.args.data.val_scale))
-        ).to_numpy()[:, 1:].astype(np.float32)
+        prediction_data = df[self.args.data.val_cutoff:].to_numpy()
+        #* remove the first column
+        prediction_data = prediction_data[:, 1:].astype(np.float32)
         predictions, actuals = [], []
         
         with torch.no_grad():
-            for i in range(0, prediction_data.shape[0] - self.args.seq_len, self.args.pred_len):
-                per_data = test_data.scaler.transform(prediction_data[i:i + self.args.seq_len, :])
+            for i in range(0, prediction_data.shape[0] - self.args.data.seq_len, self.args.data.pred_len):
+                per_data = test_data.scaler.transform(prediction_data[i:i + self.args.data.seq_len, :])
                 per_input = torch.from_numpy(per_data.reshape(1, self.args.data.seq_len, -1)).to(self.device)
                 if self.args.train.use_amp:
                     with torch.cuda.amp.autocast():
@@ -353,11 +352,12 @@ class Trainer(object):
                 output = output[:, -self.args.data.pred_len:, :].cpu().numpy()
                 shape = output.shape
                 output = test_data.inverse_transform(output.squeeze(0)).reshape(shape)
-                output = output[:, :, self.f_dim:].reshape(-1)
+                output = output[:, :, self.f_dim:].reshape(-1, 1)
                 predictions.append(output)
                 actual = prediction_data[
                     i + self.args.data.seq_len: i + self.args.data.seq_len + self.args.data.pred_len, -1
-                ].reshape(-1)
+                ].reshape(-1, 1)
+                print(actual.shape)
                 actuals.append(actual)
         predictions = np.concatenate(np.array(predictions), axis=0)
         actuals = np.concatenate(np.array(actuals), axis=0)
@@ -382,7 +382,7 @@ class Trainer(object):
             f'Prediction R2:{r2:.4f}.'
         )
         
-        test_results = pd.DataFrame({'actual': actuals.reshape(-1), 'pred': predictions})
+        test_results = pd.DataFrame({'actual': actuals.reshape(-1), 'pred': predictions.reshape(-1)})
         test_results.to_csv(os.path.join(self.log_path, 'result.csv'), index=False)
         
         time_idx = np.arange(0, actuals.shape[0], 1)

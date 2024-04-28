@@ -26,9 +26,9 @@ class Dataset_Electricity(Dataset):
         cols.remove(self.args.data.target)
         cols.remove('date')
         df_raw = df_raw[['date'] + cols + [self.args.data.target]]
-        num_train = int(len(df_raw) * self.args.data.train_scale)
-        num_test = int(len(df_raw) * self.args.data.val_scale)
-        num_vali = len(df_raw) - num_train - num_test
+        num_train = self.args.data.train_cutoff
+        num_vali = self.args.data.val_cutoff - self.args.data.train_cutoff
+        num_test = len(df_raw) - self.args.data.val_cutoff
         border1s = [0, num_train - self.args.data.seq_len, len(df_raw) - num_test - self.args.data.seq_len]
         border2s = [num_train, num_train + num_vali, len(df_raw)]
         border1 = border1s[self.set_type]
